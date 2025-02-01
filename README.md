@@ -1,3 +1,5 @@
+[![codecov](https://codecov.io/github/redis/redis/graph/badge.svg?token=6bVHb5fRuz)](https://codecov.io/github/redis/redis)
+
 This README is just a fast *quick start* document. You can find more detailed documentation at [redis.io](https://redis.io).
 
 What is Redis?
@@ -15,8 +17,8 @@ Another good example is to think of Redis as a more complex version of memcached
 
 If you want to know more, this is a list of selected starting points:
 
-* Introduction to Redis data types. https://redis.io/topics/data-types-intro
-* Try Redis directly inside your browser. https://try.redis.io
+* Introduction to Redis data types. https://redis.io/docs/latest/develop/data-types/
+
 * The full list of Redis commands. https://redis.io/commands
 * There is much more inside the official Redis documentation. https://redis.io/documentation
 
@@ -494,7 +496,7 @@ Other C files
 * `dict.c` is an implementation of a non-blocking hash table which rehashes incrementally.
 * `cluster.c` implements the Redis Cluster. Probably a good read only after being very familiar with the rest of the Redis code base. If you want to read `cluster.c` make sure to read the [Redis Cluster specification][4].
 
-[4]: https://redis.io/topics/cluster-spec
+[4]: https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/
 
 Anatomy of a Redis command
 ---

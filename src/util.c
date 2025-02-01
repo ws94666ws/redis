@@ -30,6 +30,7 @@
 
 #include "fmacros.h"
 #include "fpconv_dtoa.h"
+#include "fast_float_strtod.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -53,10 +54,20 @@
 
 #define UNUSED(x) ((void)(x))
 
+/* Selectively define static_assert. Attempt to avoid include server.h in this file. */
+#ifndef static_assert
+#define static_assert(expr, lit) extern char __static_assert_failure[(expr) ? 1:-1]
+#endif
+
+static_assert(UINTPTR_MAX == 0xffffffffffffffff || UINTPTR_MAX == 0xffffffff, "Unsupported pointer size");
+
 /* Glob-style pattern matching. */
 static int stringmatchlen_impl(const char *pattern, int patternLen,
-        const char *string, int stringLen, int nocase, int *skipLongerMatches)
+        const char *string, int stringLen, int nocase, int *skipLongerMatches, int nesting)
 {
+    /* Protection against abusive patterns. */
+    if (nesting > 1000) return 0;
+
     while(patternLen && stringLen) {
         switch(pattern[0]) {
         case '*':
@@ -68,7 +79,7 @@ static int stringmatchlen_impl(const char *pattern, int patternLen,
                 return 1; /* match */
             while(stringLen) {
                 if (stringmatchlen_impl(pattern+1, patternLen-1,
-                            string, stringLen, nocase, skipLongerMatches))
+                            string, stringLen, nocase, skipLongerMatches, nesting+1))
                     return 1; /* match */
                 if (*skipLongerMatches)
                     return 0; /* no match */
@@ -98,23 +109,23 @@ static int stringmatchlen_impl(const char *pattern, int patternLen,
 
             pattern++;
             patternLen--;
-            not = pattern[0] == '^';
+            not = patternLen && pattern[0] == '^';
             if (not) {
                 pattern++;
                 patternLen--;
             }
             match = 0;
             while(1) {
-                if (pattern[0] == '\\' && patternLen >= 2) {
+                if (patternLen >= 2 && pattern[0] == '\\') {
                     pattern++;
                     patternLen--;
                     if (pattern[0] == string[0])
                         match = 1;
-                } else if (pattern[0] == ']') {
-                    break;
                 } else if (patternLen == 0) {
                     pattern--;
                     patternLen++;
+                    break;
+                } else if (pattern[0] == ']') {
                     break;
                 } else if (patternLen >= 3 && pattern[1] == '-') {
                     int start = pattern[0];
@@ -175,7 +186,7 @@ static int stringmatchlen_impl(const char *pattern, int patternLen,
         pattern++;
         patternLen--;
         if (stringLen == 0) {
-            while(*pattern == '*') {
+            while(patternLen && *pattern == '*') {
                 pattern++;
                 patternLen--;
             }
@@ -187,10 +198,47 @@ static int stringmatchlen_impl(const char *pattern, int patternLen,
     return 0;
 }
 
+/* 
+ * glob-style pattern matching to check if a given pattern fully includes 
+ * the prefix of a string. For the match to succeed, the pattern must end with 
+ * an unescaped '*' character.
+ * 
+ * Returns: 1 if the `pattern` fully matches the `prefixStr`. Returns 0 otherwise.
+ */
+int prefixmatch(const char *pattern, int patternLen,
+                const char *prefixStr, int prefixStrLen, int nocase) {
+    int skipLongerMatches = 0;
+    
+    /* Step 1: Verify if the pattern matches the prefix string completely. */
+    if (!stringmatchlen_impl(pattern, patternLen, prefixStr, prefixStrLen, nocase, &skipLongerMatches, 0))
+        return 0;
+
+    /* Step 2: Verify that the pattern ends with an unescaped '*', indicating
+     * it can match any suffix of the string beyond the prefix. This check
+     * remains outside stringmatchlen_impl() to keep its complexity manageable.
+     */
+    if (patternLen == 0 || pattern[patternLen - 1] != '*' )
+        return 0;
+
+    /* Count backward the number of consecutive backslashes preceding the '*'
+     * to determine if the '*' is escaped. */
+    int backslashCount = 0;
+    for (int i = patternLen - 2; i >= 0; i--) {
+        if (pattern[i] == '\\')
+            ++backslashCount;
+        else
+            break; /* Stop counting when a non-backslash character is found. */
+    }
+
+    /* Return 1 if the '*' is not escaped (i.e., even count), 0 otherwise. */
+    return (backslashCount % 2 == 0);
+}
+
+/* Glob-style pattern matching to a string. */
 int stringmatchlen(const char *pattern, int patternLen,
         const char *string, int stringLen, int nocase) {
     int skipLongerMatches = 0;
-    return stringmatchlen_impl(pattern,patternLen,string,stringLen,nocase,&skipLongerMatches);
+    return stringmatchlen_impl(pattern,patternLen,string,stringLen,nocase,&skipLongerMatches,0);
 }
 
 int stringmatch(const char *pattern, const char *string, int nocase) {
@@ -612,7 +660,7 @@ int string2ld(const char *s, size_t slen, long double *dp) {
 int string2d(const char *s, size_t slen, double *dp) {
     errno = 0;
     char *eptr;
-    *dp = strtod(s, &eptr);
+    *dp = fast_float_strtod(s, &eptr);
     if (slen == 0 ||
         isspace(((const char*)s)[0]) ||
         (size_t)(eptr-(char*)s) != slen ||
